@@ -9,8 +9,8 @@ import os
 import re
 import subprocess
 
-"""Argparse override to print usage to stderr on argument error."""
 class ArgumentParserUsage(argparse.ArgumentParser):
+    """Argparse override to print usage to stderr on argument error."""
     def error(self, message):
         sys.stderr.write("error: %s\n" % message)
         self.print_help(sys.stderr)
@@ -24,25 +24,29 @@ class JournalCtl:
 
         self.__parse_args()
 
-    """Log a message to a specific pipe (defaulting to stdout)."""
+    def exit(self, exit_code=0):
+        """Deinitialise and exit."""
+        sys.exit(exit_code)
+
     def __log_message(self, message, pipe=sys.stdout):
+        """Log a message to a specific pipe (defaulting to stdout)."""
         FILENAME = sys.argv[0]
         print(FILENAME + ": " + message, file=pipe)
 
-    """If verbose, log an event."""
     def log(self, message):
+        """If verbose, log an event."""
         if not self.args.verbose:
             return
         self.__log_message(message)
 
-    """Log an error. If given a 2nd argument, exit using that error code."""
     def error(self, message, exit_code=None):
+        """Log an error. If given a 2nd argument, exit using that error code."""
         self.__log_message("error: " + message, sys.stderr)
         if exit_code:
             sys.exit(exit_code)
 
-    """Print usage and exit depending on given exit code."""
     def usage(self, exit_code):
+        """Print usage and exit depending on given exit code."""
         if exit_code == 0:
             pipe = sys.stdout
         else:
@@ -69,8 +73,8 @@ class JournalCtl:
         self.argument = self.args.argument
         self.command = self.args.command
 
-    """Run a command, returning the output."""
     def run_command(self, args):
+        """Run a command, returning the output."""
         # run without a shell so we don't need to escape strange titles
         proc = subprocess.Popen(args, stdout=subprocess.PIPE)
         out, err = proc.communicate()
@@ -97,6 +101,7 @@ class JournalCtl:
 
         if len(matches) > 1:
             self.log("more than 1 match found for title '" + title + "'")
+            self.exit()
 
         return matches
 
@@ -104,12 +109,13 @@ class JournalCtl:
         self.log("Opening entry '" + entry + "' in editor '" + self.editor + "'")
         subprocess.call([self.editor, self.journal_dir + "/" + entry])
 
-    """Return a list of the relative filename of all journal entries."""
     def get_entries(self):
+        """Return a list of the relative filename of all journal entries."""
         return os.listdir(self.journal_dir)
 
-    """Return a list of the title of each entry."""
     def get_titles(self):
+        """Return a list of the title of each entry."""
+        MATCH_GROUP_1 = 1
         title_regex = re.compile('^title: "?(.*?)"?$')
 
         files = [self.journal_dir + "/" + entry for entry in self.get_entries()]
@@ -120,7 +126,7 @@ class JournalCtl:
                 for line in current_file:
                     result = TITLE.match(line)
                     if result is not None:
-                        titles.append(result.group(1))
+                        titles.append(result.group(MATCH_GROUP_1))
                         break
                 # TODO: no title found
                 #titles.append("ayy lmao")
