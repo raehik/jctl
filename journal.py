@@ -17,8 +17,8 @@ class ArgumentParserUsage(argparse.ArgumentParser):
         sys.exit(2)
 
 class JournalCtl:
-
     def __init__(self):
+        # set some variables
         self.journal_dir = os.environ["HOME"] + "/journal"
         self.editor = os.environ["EDITOR"]
 
@@ -64,9 +64,8 @@ class JournalCtl:
         self.parser.add_argument("command", choices=commands, help="command to run")
         self.parser.add_argument("argument", nargs="?", help="argument for command")
 
-        # parse arguments
+        # parse & grab arguments
         self.args = self.parser.parse_args()
-
         self.argument = self.args.argument
         self.command = self.args.command
 
@@ -86,19 +85,20 @@ class JournalCtl:
             if self.argument == None:
                 self.error("command requires an argument")
             else:
-                self.find_entry(self.argument)
+                matches = self.find_entries(self.argument)
+                print(matches)
 
-    def find_entry(self, title):
+    def find_entries(self, title):
         files = self.get_entries()
         filename_part = self.run_command(["ezstring", title])
 
         # look at that list comprehension. goddamn, it's beautiful
         matches = [f for f in files if filename_part in f]
 
-        if len(matches) == 1:
-            self.open_entry(matches[0])
-        else:
+        if len(matches) > 1:
             self.log("more than 1 match found for title '" + title + "'")
+
+        return matches
 
     def open_entry(self, entry):
         self.log("Opening entry '" + entry + "' in editor '" + self.editor + "'")
