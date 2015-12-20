@@ -218,14 +218,23 @@ class JournalCtl:
             print("Many matches found")
 
         # TODO: make a y/n prompt function
-        yn = read("Open a matched entry? (y/n) ")
-        index = self.interactive_number_chooser(matches_all)
-        if index == -1:
-            print("Selection cancelled, exiting")
-            # TODO: replace 22, 21 etc. with self.ERR_SELECTION_CANCEL)
-            sys.exit(22)
-        for match in matches_all:
-            print(match)
+        yn = input("Open a matched entry? (y/n) ")
+        if yn.lower() == "y":
+            index = self.interactive_number_chooser(matches_all)
+            if index == -1:
+                print("Selection cancelled, exiting")
+                # TODO: replace 22, 21 etc. with self.ERR_SELECTION_CANCEL)
+                sys.exit(22)
+            else:
+                self.edit_entry(matches_all[index])
+        elif yn.lower() == "n":
+            print("Matches found in entries:")
+            for match in matches_all:
+                print(" * {}".format(match))
+            # TODO: call self.finish(0) or sth.
+            sys.exit(0)
+        else:
+            print("error: response wasn't y/n, exiting...")
 
     def search_entries_any(self, keywords):
         """Try to find entries matching given keywords in the text, where a
@@ -302,11 +311,14 @@ class JournalCtl:
 
     def get_text_of(self, entry):
         """Returns the contents of the specified entry."""
-        filename = self.get_filename_of_entry(entry)
-        with open(filename, "r") as f:
-            return f.read()
+        return self.open_entry(entry).read()
 
     def open_entry(self, entry):
+        """Returns a read-only file handle to the specified entry."""
+        filename = self.get_filename_of_entry(entry)
+        return open(filename, "r")
+
+    def edit_entry(self, entry):
         self.log("Opening entry '" + entry + "' in editor '" + self.editor + "'")
         subprocess.call([self.editor, self.get_filename_of_entry(entry)])
 
