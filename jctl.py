@@ -120,7 +120,7 @@ class JournalCtl:
                 if index == -1:
                     # hit Ctrl-C / cancelled it
                     print("Selection cancelled, exiting")
-                    sys.exit(21)
+                    sys.exit(JournalCtl.ERR_SELECT_CANCEL)
                 else:
                     # index is valid
                     e = matches[index]
@@ -352,8 +352,20 @@ class JournalCtl:
         """Return a list of all journal entry filenames (basenames)."""
         return os.listdir(self.journal_dir)
 
+    def get_front_matter(self, entry):
+        with self.open_entry(entry) as f:
+            text = f.read()
+            begin_index = 4
+            end_index = text.find("\n---")
+            return text[begin_index:end_index].strip()
+
+    def update_time(self, entry, new_time):
+        with self.open_entry(entry) as f:
+            print(f.read())
+
     def get_titles(self):
         """Return a list of the title of each entry."""
+        # TODO: test this method
         title_regex = re.compile('^title: "?(.*?)"?$')
 
         files = [self.get_entry_file(entry) for entry in self.get_entries()]
@@ -378,4 +390,6 @@ class JournalCtl:
 
 if __name__ == "__main__":
     jctl = JournalCtl()
-    jctl.execute_cmd()
+    #jctl.execute_cmd()
+    #jctl.update_time("game-review-huniepop.md", "2015-01-1")
+    jctl.get_front_matter("game-review-huniepop.md")
