@@ -17,8 +17,15 @@ class ArgumentParserUsage(argparse.ArgumentParser):
         sys.exit(2)
 
 class JournalCtl:
+    # static class vars
+    READ_ONLY = "r"
+    READ_WRITE = "rw"
+
+    ERR_NONE_FOUND = 2
+    ERR_SELECT_CANCEL = 3
+
     def __init__(self):
-        # set some variables
+        # set variables
         self.journal_dir = os.environ["HOME"] + "/journal"
         self.editor = os.environ["EDITOR"]
         self.command_dir = "commands"
@@ -63,7 +70,8 @@ class JournalCtl:
     # Logging }}}
 
     def __parse_args(self):
-        self.parser = ArgumentParserUsage(description="Control program for a journal kept in Jekyll.")
+        self.parser = ArgumentParserUsage(
+                description="Control program for a journal kept in Jekyll.")
 
         # add arguments
         self.parser.add_argument("-v", "--verbose", help="be verbose",
@@ -77,8 +85,8 @@ class JournalCtl:
         self.arguments = self.args.arguments
         self.command = self.args.command
 
-    def run_command(self, args):
-        """Run a command, returning the output."""
+    def run_shell(self, args):
+        """Run a shell command, returning the output."""
         # we run without a shell (default) so we don't need to shell escape
         # strange titles e.g. ones with punctuation in
         proc = subprocess.Popen(args, stdout=subprocess.PIPE)
@@ -103,7 +111,7 @@ class JournalCtl:
             matches = self.find_entries(arguments)
             if len(matches) == 0:
                 print("No entries found for your query.")
-                sys.exit(20)
+                sys.exit(JournalCtl.ERR_NONE_FOUND)
             if len(matches) > 1:
                 self.log("many entries found")
                 print("More than one entry found for your queries.")
@@ -223,16 +231,13 @@ class JournalCtl:
             index = self.interactive_number_chooser(matches_all)
             if index == -1:
                 print("Selection cancelled, exiting")
-                # TODO: replace 22, 21 etc. with self.ERR_SELECTION_CANCEL)
-                sys.exit(22)
+                sys.exit(JournalCtl.ERR_SELECT_CANCEL)
             else:
                 self.edit_entry(matches_all[index])
         elif yn.lower() == "n":
             print("Matches found in entries:")
             for match in matches_all:
                 print(" * {}".format(match))
-            # TODO: call self.finish(0) or sth.
-            sys.exit(0)
         else:
             print("error: response wasn't y/n, exiting...")
 
@@ -284,7 +289,8 @@ class JournalCtl:
         return matches
 
     def search_entries_all(self, keywords):
-        """Try to find entries matching given keywords in the text, where a
+        """
+        Try to find entries matching given keywords in the text, where a
         valid match is *each of* of the keywords found in text.
 
         Returns a list of matches.
@@ -316,13 +322,21 @@ class JournalCtl:
     def open_entry(self, entry):
         """Returns a read-only file handle to the specified entry."""
         filename = self.get_filename_of_entry(entry)
-        return open(filename, "r")
+        return open(filename, JournalCtl.READ_ONLY)
 
     def edit_entry(self, entry):
         self.log("Opening entry '" + entry + "' in editor '" + self.editor + "'")
         subprocess.call([self.editor, self.get_filename_of_entry(entry)])
 
     def get_filename_of_entry(self, entry):
+        """
+        Returns a constructed full path for a given 'basename' file name (the
+        entry).
+
+        Note that this constructed file does *not* need to exist, since we might
+        be opening a new file -- thus other functions must do that checking
+        where required.
+        """
         return self.journal_dir + "/" + entry
 
     def get_entries(self):
@@ -331,18 +345,17 @@ class JournalCtl:
 
     def get_titles(self):
         """Return a list of the title of each entry."""
-        MATCH_GROUP_1 = 1
         title_regex = re.compile('^title: "?(.*?)"?$')
 
-        files = [self.journal_dir + "/" + entry for entry in self.get_entries()]
+        files = [self.get_filename_of_entry(entry) for entry in self.get_entries()]
 
         titles = []
         for f in files:
-            with open(f) as current_file:
+            with self.open_entry(f) as current_file:
                 for line in current_file:
                     result = TITLE.match(line)
                     if result is not None:
-                        titles.append(result.group(MATCH_GROUP_1))
+                        titles.append(result.group(1))
                         break
                 # TODO: no title found
                 #titles.append("ayy lmao")
@@ -350,7 +363,7 @@ class JournalCtl:
 
         #combined = []
         #for title in titles:
-        #    combined.append([title, run_command(["ezstring", title])])
+        #    combined.append([title, run_shell(["ezstring", title])])
 
         #print(combined)
 
