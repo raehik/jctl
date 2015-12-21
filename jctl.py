@@ -130,12 +130,21 @@ class JournalCtl:
                 self.log("one file found")
                 self.edit_entry(matches[0])
 
-    def edit_entry(self, filename):
+    def edit_entry(self, entry):
         # use subprocess.call() so it works properly
-        subprocess.call([self.editor, self.journal_dir + "/" + filename])
+        subprocess.call([self.editor, self.get_entry_file(entry)])
 
     def interactive_number_chooser(self, options):
-        """Show an interactive chooser and return the number entered."""
+        """
+        Show an interactive chooser for a list of options and return the number
+        entered.
+
+        For valid input, returns a positive integer for the option's index in
+        the list.
+        For other input (cancelled, empty line), returns -1.
+
+        """
+        ret_bad_input = -1
         indent_spaces = 3
         valid_input = False
         print("Please enter the number corresponding to the entry you want to choose:")
@@ -153,15 +162,15 @@ class JournalCtl:
             except KeyboardInterrupt:
                 # new line so it looks better
                 print()
-                return -1
+                return ret_bad_input
             except EOFError:
                 print("Ctrl-D pressed, exiting...")
-                return -1
+                return ret_bad_input
 
             # special input values
             if ans == "" or ans == "quit" or ans == "q":
                 print("Exiting selection...")
-                return -1
+                return ret_bad_input
 
             try:
                 int_ans = int(ans)
@@ -321,14 +330,14 @@ class JournalCtl:
 
     def open_entry(self, entry):
         """Returns a read-only file handle to the specified entry."""
-        filename = self.get_filename_of_entry(entry)
+        filename = self.get_entry_file(entry)
         return open(filename, JournalCtl.READ_ONLY)
 
     def edit_entry(self, entry):
         self.log("Opening entry '" + entry + "' in editor '" + self.editor + "'")
-        subprocess.call([self.editor, self.get_filename_of_entry(entry)])
+        subprocess.call([self.editor, self.get_entry_file(entry)])
 
-    def get_filename_of_entry(self, entry):
+    def get_entry_file(self, entry):
         """
         Returns a constructed full path for a given 'basename' file name (the
         entry).
@@ -347,7 +356,7 @@ class JournalCtl:
         """Return a list of the title of each entry."""
         title_regex = re.compile('^title: "?(.*?)"?$')
 
-        files = [self.get_filename_of_entry(entry) for entry in self.get_entries()]
+        files = [self.get_entry_file(entry) for entry in self.get_entries()]
 
         titles = []
         for f in files:
