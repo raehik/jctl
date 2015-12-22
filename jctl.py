@@ -8,6 +8,9 @@ import argparse
 import os
 import re
 import subprocess
+import time
+import shutil
+import filecmp
 
 class ArgumentParserUsage(argparse.ArgumentParser):
     """Argparse override to print usage to stderr on argument error."""
@@ -19,8 +22,17 @@ class ArgumentParserUsage(argparse.ArgumentParser):
 class JournalCtl:
     # static class vars
     READ_ONLY = "r"
-    READ_WRITE = "rw"
+    WRITE_ONLY = "w"
 
+    FRONT_MATTER_SEP = "---"
+    FRONT_MATTER_VALUE_SEP = ": "
+    FRONT_MATTER_END = "\n" + FRONT_MATTER_SEP + "\n"
+
+    TMP_DIR = "/tmp"
+    TMP_PREFIX = "jctl"
+    TMP_EXT = ".md"
+
+    SUCCESS = 0
     ERR_NONE_FOUND = 2
     ERR_SELECT_CANCEL = 3
 
@@ -67,6 +79,10 @@ class JournalCtl:
 
         self.parser.print_help(pipe)
         sys.exit(exit_code)
+
+    def message(self, message):
+        """Print a message to stdout, regardless of verbosity."""
+        print(message)
     # Logging }}}
 
     def __parse_args(self):
@@ -103,6 +119,8 @@ class JournalCtl:
             self.cmd_edit(self.arguments)
         elif self.command in self.search_aliases:
             self.cmd_search(self.arguments)
+        else:
+            self.error("No such command '{}'".format(self.command))
 
     def cmd_edit(self, arguments):
         if not arguments:
@@ -110,29 +128,24 @@ class JournalCtl:
         else:
             matches = self.find_entries(arguments)
             if len(matches) == 0:
-                print("No entries found for your query.")
+                self.message("No entries found for your query.")
                 sys.exit(JournalCtl.ERR_NONE_FOUND)
             if len(matches) > 1:
                 self.log("many entries found")
-                print("More than one entry found for your queries.")
+                self.message("More than one entry found for your queries.")
                 # ask user which one to open
                 index = self.interactive_number_chooser(matches)
                 if index == -1:
                     # hit Ctrl-C / cancelled it
-                    print("Selection cancelled, exiting")
+                    self.message("Selection cancelled, exiting")
                     sys.exit(JournalCtl.ERR_SELECT_CANCEL)
                 else:
                     # index is valid
                     e = matches[index]
-                    self.log("opening entry: {}".format(e))
                     self.edit_entry(e)
             else:
                 self.log("one file found")
                 self.edit_entry(matches[0])
-
-    def edit_entry(self, entry):
-        # use subprocess.call() so it works properly
-        subprocess.call([self.editor, self.get_entry_file(entry)])
 
     def interactive_number_chooser(self, options):
         """
@@ -146,13 +159,13 @@ class JournalCtl:
         """
         ret_bad_input = -1
         indent_spaces = 3
+        start_num = 1
         valid_input = False
         print("Please enter the number corresponding to the entry you want to choose:")
         print()
 
-        num_of_options = len(options)
-        for i in range(num_of_options):
-            print("{0:{1}d}) {2}".format(i, indent_spaces, options[i]))
+        for i, opt in enumerate(options, start_num):
+            print("{0:{1}d}) {2}".format(i, indent_spaces, opt))
 
         print()
 
@@ -178,12 +191,13 @@ class JournalCtl:
                 print("ERROR: not an integer. Please try again.")
                 continue
 
-            if 0 <= int_ans < num_of_options:
+            index = int_ans - start_num
+            if 0 <= index < len(options):
                 valid_input = True
             else:
                 print("ERROR: entry specified was out of range. Please try again.")
 
-        return int_ans
+        return index
 
     def find_entries(self, keywords):
         """Try to find entries matching *all* given keyword(s) in the filename
@@ -227,28 +241,37 @@ class JournalCtl:
 
         # pretty-print 'all' matches
         if len(matches_all) == 0:
-            print("No matches found for your query")
-            sys.exit(0)
+            self.message("No matches found for your query")
+            sys.exit(JournalCtl.SUCCESS)
         elif len(matches_all) == 1:
-            print("1 match found")
+            self.message("1 match found")
         elif len(matches_all) > 1:
-            print("Many matches found")
+            self.message("Many matches found")
 
-        # TODO: make a y/n prompt function
-        yn = input("Open a matched entry? (y/n) ")
-        if yn.lower() == "y":
+        yn = self.__yn_prompt("Open a matched entry?")
+        if yn == 0:
             index = self.interactive_number_chooser(matches_all)
             if index == -1:
-                print("Selection cancelled, exiting")
+                self.message("Selection cancelled, exiting")
                 sys.exit(JournalCtl.ERR_SELECT_CANCEL)
             else:
                 self.edit_entry(matches_all[index])
-        elif yn.lower() == "n":
-            print("Matches found in entries:")
+        elif yn == 1:
+            self.message("Matches found in entries:")
             for match in matches_all:
                 print(" * {}".format(match))
         else:
-            print("error: response wasn't y/n, exiting...")
+            message("ERROR: response wasn't y/n, exiting...")
+
+    def __yn_prompt(self, prompt_msg):
+        yn = input(prompt_msg + " (y/n) ").lower()
+        if yn == "y" or yn == "yes":
+            return 0
+        elif yn == "n" or yn == "no":
+            return 1
+        else:
+            return -1
+
 
     def search_entries_any(self, keywords):
         """Try to find entries matching given keywords in the text, where a
@@ -334,8 +357,45 @@ class JournalCtl:
         return open(filename, JournalCtl.READ_ONLY)
 
     def edit_entry(self, entry):
-        self.log("Opening entry '" + entry + "' in editor '" + self.editor + "'")
-        subprocess.call([self.editor, self.get_entry_file(entry)])
+        entry_file = self.get_entry_file(entry)
+
+        tmpfile = self.__generate_entry_tmpfile(entry)
+        self.log("Opening entry '{}' using '{}'".format(entry, self.editor))
+        # use subprocess.call() so it works properly
+        #subprocess.call([self.editor, self.get_entry_file(entry)])
+        subprocess.call([self.editor, tmpfile])
+
+        # we get here when the file has been closed
+        if filecmp.cmp(entry_file, tmpfile):
+            # files are identical: no changes were made
+            self.message("No changes made")
+        else:
+            # move tmpfile to original entry
+            shutil.move(tmpfile, entry_file)
+            self.message("File has been changed")
+            yn = self.__yn_prompt("Update timestamp?")
+            if yn == 0:
+                self.update_time(entry)
+            else:
+                self.message("Exiting...")
+
+
+    def __generate_entry_tmpfile(self, entry):
+        """
+        Generates a temporary file for entry editing, copies the given entry to
+        it and returns the filename.
+
+        Requires that JournalCtl.TMP_DIR exists.
+        """
+        tmp_dir = JournalCtl.TMP_DIR
+        tmp_file = JournalCtl.TMP_DIR + "/" \
+                + JournalCtl.TMP_PREFIX + "-" \
+                + str(int(time.time())) \
+                + JournalCtl.TMP_EXT
+
+        shutil.copyfile(self.get_entry_file(entry), tmp_file)
+
+        return tmp_file
 
     def get_entry_file(self, entry):
         """
@@ -355,13 +415,67 @@ class JournalCtl:
     def get_front_matter(self, entry):
         with self.open_entry(entry) as f:
             text = f.read()
-            begin_index = 4
-            end_index = text.find("\n---")
-            return text[begin_index:end_index].strip()
 
-    def update_time(self, entry, new_time):
+        # FIXME: not the best way of setting begin index
+        begin_index = 4
+        end_index = text.find(JournalCtl.FRONT_MATTER_END)
+        raw_front_matter = text[begin_index:end_index].strip().split("\n")
+
+        front_matter = []
+        for line in raw_front_matter:
+            parts = line.split(JournalCtl.FRONT_MATTER_VALUE_SEP, 1)
+            if len(parts) > 2:
+                self.error("somehow split front matter line into >2 parts")
+            elif len(parts) == 1 and parts[0] == "":
+                self.log("empty line in front matter")
+                parts = None
+            front_matter.append(parts)
+
+        return front_matter
+
+    def get_entry_text(self, entry):
         with self.open_entry(entry) as f:
-            print(f.read())
+            text = f.read()
+
+        begin_index = text.find(JournalCtl.FRONT_MATTER_END)
+        entry_text = text[begin_index+len(JournalCtl.FRONT_MATTER_END):]
+        return entry_text
+
+    def update_time(self, entry):
+        """
+        Update the time in an entry to the time now.
+
+        Awkwardly, I have to rewrite the entire file to do this. Oh well.
+        """
+        front_matter = self.get_front_matter(entry)
+        entry_text = self.get_entry_text(entry)
+        new_time = int(time.time())
+
+        entry_file = self.get_entry_file(entry)
+
+        new_text = ""
+        new_text += JournalCtl.FRONT_MATTER_SEP + "\n"
+        for line in front_matter:
+            if line == None:
+                # empty line
+                new_text += "\n"
+                continue
+
+            var = line[0]
+            value = line[1]
+            if var == "date":
+                # found date line: let's update it before adding it
+                value = time.strftime("%F %T")
+                self.message("Timestamp updated ({} -> {}).".format(line[1], value))
+            new_text += "{}: {}\n".format(var, value)
+        new_text += JournalCtl.FRONT_MATTER_SEP + "\n"
+        new_text += entry_text
+
+        with open(entry_file, JournalCtl.WRITE_ONLY) as f:
+            f.write(new_text)
+
+    def update_entry(self, front_matter, entry_text):
+        pass
 
     def get_titles(self):
         """Return a list of the title of each entry."""
@@ -390,6 +504,4 @@ class JournalCtl:
 
 if __name__ == "__main__":
     jctl = JournalCtl()
-    #jctl.execute_cmd()
-    #jctl.update_time("game-review-huniepop.md", "2015-01-1")
-    jctl.get_front_matter("game-review-huniepop.md")
+    jctl.execute_cmd()
