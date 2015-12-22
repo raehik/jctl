@@ -119,6 +119,8 @@ class JournalCtl:
             self.cmd_edit(self.arguments)
         elif self.command in self.search_aliases:
             self.cmd_search(self.arguments)
+        elif self.command == "help":
+            print("Available commands: search, edit, help")
         else:
             self.error("No such command '{}'".format(self.command))
 
