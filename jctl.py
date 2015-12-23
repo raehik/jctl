@@ -22,27 +22,25 @@ class ArgumentParserUsage(argparse.ArgumentParser):
         sys.exit(2)
 
 class JournalCtl:
-    # static class vars
-    READ_ONLY = "r"
-    WRITE_ONLY = "w"
-
-    TEMPLATER_CMD = "pyplater.py"
-    TEMPLATE_PREFIX = "jctl-"
-    SLUG_CMD = "ezstring"
-    ENTRY_EXT = ".md"
-
-    FRONT_MATTER_SEP = "---"
-    FRONT_MATTER_VALUE_SEP = ": "
-    FRONT_MATTER_END = "\n" + FRONT_MATTER_SEP + "\n"
-
-    TMP_DIR = "/tmp"
-    TMP_PREFIX = "jctl"
-
     SUCCESS = 0
     ERR_NONE_FOUND = 1
     ERR_TEMPLATE_FAIL = 2
     ERR_SELECT_CANCEL = 3
     ERR_FILE_EXISTS = 4
+
+    READ_ONLY = "r"
+    WRITE_ONLY = "w"
+    TMP_DIR = "/tmp"
+    TMP_PREFIX = "jctl"
+
+    TEMPLATER_CMD = "pyplater.py"
+    TEMPLATE_PREFIX = "jctl-"
+    SLUG_CMD = "ezstring"
+    ENTRY_EXT = ".md" # if this has >1 full stop then you gotta fix get_entries()
+
+    FRONT_MATTER_SEP = "---"
+    FRONT_MATTER_VALUE_SEP = ": "
+    FRONT_MATTER_END = "\n" + FRONT_MATTER_SEP + "\n"
 
     def __init__(self):
         # set variables
@@ -138,10 +136,10 @@ class JournalCtl:
 
     def cmd_new(self, arguments):
         """
-        Create a new entry using Pyplater.
+        Create a new entry using a file templater (by default, my Pyplater).
 
         Note that unlike my previous 'journal' template, the 'jctl-*' templates
-        require that jctl provides the *full* filename. That way Pyplater
+        require that jctl provides the *full* filename. That way the templater
         doesn't get involved with journal placement.
         """
         # we need at least the template name (entry, exam, meal) & title
@@ -176,6 +174,8 @@ class JournalCtl:
             self.message("Templating failed (error code {})".format(ret))
             sys.exit(JournalCtl.ERR_TEMPLATE_FAIL)
 
+        # I use date field as 'last edited' field, so update again when finished
+        # (my Pyplater already fills it in, but only at the start)
         self.update_time(entry_name)
 
     def cmd_edit(self, arguments):
@@ -217,6 +217,11 @@ class JournalCtl:
         indent_spaces = 3
         start_num = 1
         valid_input = False
+
+        if len(options) == 1:
+            # there is one option. return its index :)
+            return 0
+
         print("Please enter the number corresponding to the entry you want to choose:")
         print()
 
@@ -279,21 +284,8 @@ class JournalCtl:
     def cmd_search(self, arguments):
         """Search for keywords in full journal text."""
 
-        """
-        # get matches matching any of keywords
-        matches_any = self.search_entries_any(arguments)
-
-        # pretty-print 'any' matches
-        for match in matches_any:
-            print("{}: '{}' @ L.{}".format(
-                match["entry_name"],
-                match["keyword_match"],
-                match["line_no"]
-            ))
-        """
-
-        # OR get matches for *all* keywords
-        matches_all = self.search_entries_all(arguments)
+        # get matches for *all* keywords
+        matches_all = self.search_entries(arguments)
 
         # pretty-print 'all' matches
         if len(matches_all) == 0:
@@ -317,66 +309,36 @@ class JournalCtl:
             for match in matches_all:
                 print(" * {}".format(match))
         else:
-            message("ERROR: response wasn't y/n, exiting...")
+            self.message("ERROR: response wasn't y/n, exiting...")
 
     def __yn_prompt(self, prompt_msg):
-        yn = input(prompt_msg + " (y/n) ").lower()
+        """
+        Prompt the user with a yes/no question.
+
+        Returns 0 for 'yes'.
+        Returns 1 for 'no'.
+        Returns -1 for invalid input.
+        """
+        ret_y = 0
+        ret_n = 1
+        ret_invalid = -1
+
+        try:
+            yn = input(prompt_msg + " (y/n) ").lower()
+        except KeyboardInterrupt:
+            # new line so it looks better
+            print()
+            return ret_invalid
+        except EOFError:
+            return ret_invalid
         if yn == "y" or yn == "yes":
-            return 0
+            return ret_y
         elif yn == "n" or yn == "no":
-            return 1
+            return ret_n
         else:
             return -1
 
-
-    def search_entries_any(self, keywords):
-        """Try to find entries matching given keywords in the text, where a
-        valid match is *any one* of the keywords.
-
-        Returns a list of matches in the following format:
-
-            [
-                [
-                entry_name: entry
-                keyword_match: keywords[i]
-                line_no: 123
-                line_text: "... keywords[i] ..."
-                ]
-            ]
-        """
-
-        # TODO: 3 `for` loops deep? maybe not the best
-
-        FIRST_LINE_INDEX = 1
-
-        # sort & reverse for niceness (can't do at the end without manual
-        # sorting methods)
-        entries = sorted(self.get_entries(), reverse=True)
-
-        matches = []
-
-        # check entry text
-        for entry in entries:
-            text = self.get_text_of(entry)
-            lines = text.split("\n")
-            for w in keywords:
-                for i, line in enumerate(lines, FIRST_LINE_INDEX):
-                    # we check lower case, but we don't make the actual
-                    # variables lower, so that we can show the original keyword
-                    # matches & line text
-                    if w.lower() in line.lower():
-                        matches.append({
-                            "entry_name": entry,
-                            "keyword_match": w,
-                            "line_no": i,
-                            "line_text": line,
-                        })
-
-        # TODO: check entry titles/filenames (both?) too
-
-        return matches
-
-    def search_entries_all(self, keywords):
+    def search_entries(self, keywords):
         """
         Try to find entries matching given keywords in the text, where a
         valid match is *each of* of the keywords found in text.
@@ -391,7 +353,8 @@ class JournalCtl:
         matches = []
         for entry in entries:
             text = self.get_text_of(entry)
-            if all(word in text for word in keywords):
+            # remember to check everything in lowercase
+            if all(word.lower() in text.lower() for word in keywords):
                 matches.append(entry)
 
         if len(matches) == 0:
@@ -436,8 +399,8 @@ class JournalCtl:
 
     def __generate_entry_tmpfile(self, entry):
         """
-        Generates a temporary file for entry editing, copies the given entry to
-        it and returns the filename.
+        Copies the given entry to a temporary file for entry editing and returns
+        the temporary file's name.
 
         Requires that JournalCtl.TMP_DIR exists.
         """
@@ -503,9 +466,9 @@ class JournalCtl:
 
     def update_time(self, entry):
         """Update the time in an entry to the time now."""
-        self.fix_file(entry, date=time.strftime("%F %T"))
+        self.fix_entry(entry, date=time.strftime("%F %T"))
 
-    def fix_file(self, entry, date=None):
+    def fix_entry(self, entry, date=None):
         """
         Check that an entry is named correctly (considering its metadata
         in-file to be accurate) and fix the filename if required.
@@ -553,30 +516,7 @@ class JournalCtl:
             shutil.move(entry_file, new_file)
             self.log("moved entry ({} -> {})".format(entry, check_entry))
 
-    def get_titles(self):
-        """Return a list of the title of each entry."""
-        # TODO: test this method
-        title_regex = re.compile('^title: "?(.*?)"?$')
 
-        files = [self.get_entry_file(entry) for entry in self.get_entries()]
-
-        titles = []
-        for f in files:
-            with self.open_entry(f) as current_file:
-                for line in current_file:
-                    result = TITLE.match(line)
-                    if result is not None:
-                        titles.append(result.group(1))
-                        break
-                # TODO: no title found
-                #titles.append("ayy lmao")
-
-
-        #combined = []
-        #for title in titles:
-        #    combined.append([title, get_shell(["ezstring", title])])
-
-        #print(combined)
 
 if __name__ == "__main__":
     jctl = JournalCtl()
