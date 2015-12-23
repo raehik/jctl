@@ -12,6 +12,8 @@ import time
 import shutil
 import filecmp
 
+FILENAME = os.path.basename(sys.argv[0])
+
 class ArgumentParserUsage(argparse.ArgumentParser):
     """Argparse override to print usage to stderr on argument error."""
     def error(self, message):
@@ -24,25 +26,30 @@ class JournalCtl:
     READ_ONLY = "r"
     WRITE_ONLY = "w"
 
+    TEMPLATER_CMD = "pyplater.py"
+    TEMPLATE_PREFIX = "jctl-"
+    SLUG_CMD = "ezstring"
+    ENTRY_EXT = ".md"
+
     FRONT_MATTER_SEP = "---"
     FRONT_MATTER_VALUE_SEP = ": "
     FRONT_MATTER_END = "\n" + FRONT_MATTER_SEP + "\n"
 
     TMP_DIR = "/tmp"
     TMP_PREFIX = "jctl"
-    TMP_EXT = ".md"
 
     SUCCESS = 0
-    ERR_NONE_FOUND = 2
+    ERR_NONE_FOUND = 1
+    ERR_TEMPLATE_FAIL = 2
     ERR_SELECT_CANCEL = 3
+    ERR_FILE_EXISTS = 4
 
     def __init__(self):
         # set variables
         self.journal_dir = os.environ["HOME"] + "/journal"
         self.editor = os.environ["EDITOR"]
-        self.command_dir = "commands"
-        self.commands_to_import = ["open"]
 
+        self.new_aliases = ["new", "n"]
         self.edit_aliases = ["edit", "e"]
         self.search_aliases = ["search", "s"]
 
@@ -55,7 +62,6 @@ class JournalCtl:
     # Logging {{{
     def __log_message(self, message, pipe=sys.stdout):
         """Log a message to a specific pipe (defaulting to stdout)."""
-        FILENAME = sys.argv[0]
         print(FILENAME + ": " + message, file=pipe)
 
     def log(self, message):
@@ -92,7 +98,6 @@ class JournalCtl:
         # add arguments
         self.parser.add_argument("-v", "--verbose", help="be verbose",
                             action="store_true")
-        self.parser.add_argument("-l", "--layout", help="layout to use")
         self.parser.add_argument("command", help="command to run")
         self.parser.add_argument("arguments", nargs="*", help="argument(s) for command")
 
@@ -101,28 +106,77 @@ class JournalCtl:
         self.arguments = self.args.arguments
         self.command = self.args.command
 
-    def run_shell(self, args):
+    def get_shell(self, args):
         """Run a shell command, returning the output."""
         # we run without a shell (default) so we don't need to shell escape
         # strange titles e.g. ones with punctuation in
+        was_successful = False
         proc = subprocess.Popen(args, stdout=subprocess.PIPE)
         out, err = proc.communicate()
 
-        if proc.returncode != 0:
-            was_successful = False
+        if proc.returncode == 0:
+            was_successful = True
 
-        return out.decode("utf-8").strip()
+        return out.decode("utf-8").strip(), was_successful
+
+    def run_interactive(self, args):
+        """Run an interactive shell command and return the return code."""
+        return subprocess.call(args)
 
     def execute_cmd(self):
         """Try to run something based on the command given."""
-        if self.command in self.edit_aliases:
+        if self.command in self.new_aliases:
+            self.cmd_new(self.arguments)
+        elif self.command in self.edit_aliases:
             self.cmd_edit(self.arguments)
         elif self.command in self.search_aliases:
             self.cmd_search(self.arguments)
         elif self.command == "help":
-            print("Available commands: search, edit, help")
+            print("Available commands: new, search, edit, help")
         else:
             self.error("No such command '{}'".format(self.command))
+
+    def cmd_new(self, arguments):
+        """
+        Create a new entry using Pyplater.
+
+        Note that unlike my previous 'journal' template, the 'jctl-*' templates
+        require that jctl provides the *full* filename. That way Pyplater
+        doesn't get involved with journal placement.
+        """
+        # we need at least the template name (entry, exam, meal) & title
+        if len(arguments) < 2:
+            self.error("expected at least 2 arguments (got {})".format(
+                len(arguments)))
+
+        # get title & name of new entry
+        entry_title = " ".join(arguments[1:])
+        slug, ret = self.get_shell([JournalCtl.SLUG_CMD, entry_title])
+        entry_name = "{}-{}".format(time.strftime("%F"), slug)
+        entry_file = self.get_entry_file(entry_name)
+
+        # check that exact file does not exist already
+        if os.path.isfile(entry_file):
+            self.error("entry '{}' already exists".format(entry_name))
+            sys.exit(ERR_FILE_EXISTS)
+
+        # templater command
+        template = JournalCtl.TEMPLATE_PREFIX + arguments[0]
+        template_cmd = [
+                JournalCtl.TEMPLATER_CMD,
+                template,
+                entry_file,
+                entry_title,
+                ]
+        ret = self.run_interactive(template_cmd)
+
+        if ret == 0:
+            self.log("Templating succeeded")
+        else:
+            self.message("Templating failed (error code {})".format(ret))
+            sys.exit(JournalCtl.ERR_TEMPLATE_FAIL)
+
+        self.update_time(entry_name)
 
     def cmd_edit(self, arguments):
         if not arguments:
@@ -134,7 +188,7 @@ class JournalCtl:
                 sys.exit(JournalCtl.ERR_NONE_FOUND)
             if len(matches) > 1:
                 self.log("many entries found")
-                self.message("More than one entry found for your queries.")
+                self.message("More than one entry found for your query.")
                 # ask user which one to open
                 index = self.interactive_number_chooser(matches)
                 if index == -1:
@@ -363,9 +417,7 @@ class JournalCtl:
 
         tmpfile = self.__generate_entry_tmpfile(entry)
         self.log("Opening entry '{}' using '{}'".format(entry, self.editor))
-        # use subprocess.call() so it works properly
-        #subprocess.call([self.editor, self.get_entry_file(entry)])
-        subprocess.call([self.editor, tmpfile])
+        self.run_interactive([self.editor, tmpfile])
 
         # we get here when the file has been closed
         if filecmp.cmp(entry_file, tmpfile):
@@ -393,7 +445,7 @@ class JournalCtl:
         tmp_file = JournalCtl.TMP_DIR + "/" \
                 + JournalCtl.TMP_PREFIX + "-" \
                 + str(int(time.time())) \
-                + JournalCtl.TMP_EXT
+                + JournalCtl.ENTRY_EXT
 
         shutil.copyfile(self.get_entry_file(entry), tmp_file)
 
@@ -408,11 +460,17 @@ class JournalCtl:
         be opening a new file -- thus other functions must do that checking
         where required.
         """
-        return self.journal_dir + "/" + entry
+        return self.journal_dir + "/" + entry + JournalCtl.ENTRY_EXT
 
     def get_entries(self):
-        """Return a list of all journal entry filenames (basenames)."""
-        return os.listdir(self.journal_dir)
+        """
+        Return a list of all entry names.
+
+        In jctl, most functions only deal with the 'slug' as an entry name (i.e.
+        'YYYY-MM-DD-title-slug'). This function returns the 'basename' of each
+        entry, without full path *or the extension*.
+        """
+        return [ os.path.splitext(entry)[0] for entry in os.listdir(self.journal_dir) ]
 
     def get_front_matter(self, entry):
         with self.open_entry(entry) as f:
@@ -444,14 +502,18 @@ class JournalCtl:
         return entry_text
 
     def update_time(self, entry):
-        """
-        Update the time in an entry to the time now.
+        """Update the time in an entry to the time now."""
+        self.fix_file(entry, date=time.strftime("%F %T"))
 
-        Awkwardly, I have to rewrite the entire file to do this. Oh well.
+    def fix_file(self, entry, date=None):
+        """
+        Check that an entry is named correctly (considering its metadata
+        in-file to be accurate) and fix the filename if required.
+
+        If a date is provided, replace the file's 'date' field with it.
         """
         front_matter = self.get_front_matter(entry)
         entry_text = self.get_entry_text(entry)
-        new_time = int(time.time())
 
         entry_file = self.get_entry_file(entry)
 
@@ -466,9 +528,16 @@ class JournalCtl:
             var = line[0]
             value = line[1]
             if var == "date":
-                # found date line: let's update it before adding it
-                value = time.strftime("%F %T")
-                self.message("Timestamp updated ({} -> {}).".format(line[1], value))
+                # get old date (used to check filename consistency)
+                old_date = value
+                if date != None:
+                    # we were given a date to update to, so do it
+                    value = date
+                    self.log("timestamp updated ({} -> {}).".format(
+                        line[1], value))
+            if var == "title":
+                # grab the title to check consistency with later
+                entry_title = value
             new_text += "{}: {}\n".format(var, value)
         new_text += JournalCtl.FRONT_MATTER_SEP + "\n"
         new_text += entry_text
@@ -476,8 +545,13 @@ class JournalCtl:
         with open(entry_file, JournalCtl.WRITE_ONLY) as f:
             f.write(new_text)
 
-    def update_entry(self, front_matter, entry_text):
-        pass
+        check_entry = date.split(" ")[0] + "-" \
+                + self.get_shell([JournalCtl.SLUG_CMD, entry_title])[0]
+        if entry != check_entry:
+            self.message("Filename is inconsistent with date/title, fixing using metadata")
+            new_file = self.get_entry_file(check_entry)
+            shutil.move(entry_file, new_file)
+            self.log("moved entry ({} -> {})".format(entry, check_entry))
 
     def get_titles(self):
         """Return a list of the title of each entry."""
@@ -500,7 +574,7 @@ class JournalCtl:
 
         #combined = []
         #for title in titles:
-        #    combined.append([title, run_shell(["ezstring", title])])
+        #    combined.append([title, get_shell(["ezstring", title])])
 
         #print(combined)
 
