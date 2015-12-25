@@ -27,6 +27,8 @@ class JournalCtl:
     ERR_TEMPLATE_FAIL = 2
     ERR_SELECT_CANCEL = 3
     ERR_FILE_EXISTS = 4
+    ERR_NO_SUCH_CMD = 5
+    ERR_WRONG_ARGS = 6
 
     READ_ONLY = "r"
     WRITE_ONLY = "w"
@@ -132,7 +134,9 @@ class JournalCtl:
         elif self.command == "help":
             print("Available commands: new, search, edit, help")
         else:
-            self.error("No such command '{}'".format(self.command))
+            self.error(
+                    "No such command '{}'".format(self.command),
+                    JournalCtl.ERR_NO_SUCH_CMD)
 
     def cmd_new(self, arguments):
         """
@@ -145,7 +149,7 @@ class JournalCtl:
         # we need at least the template name (entry, exam, meal) & title
         if len(arguments) < 2:
             self.error("expected at least 2 arguments (got {})".format(
-                len(arguments)))
+                len(arguments)), JournalCtl.ERR_WRONG_ARGS)
 
         # get title & name of new entry
         entry_title = " ".join(arguments[1:])
@@ -155,8 +159,8 @@ class JournalCtl:
 
         # check that exact file does not exist already
         if os.path.isfile(entry_file):
-            self.error("entry '{}' already exists".format(entry_name))
-            sys.exit(ERR_FILE_EXISTS)
+            self.error("entry '{}' already exists".format(entry_name),
+                    JournalCtl.ERR_FILE_EXISTS)
 
         # templater command
         template = JournalCtl.TEMPLATE_PREFIX + arguments[0]
@@ -169,10 +173,10 @@ class JournalCtl:
         ret = self.run_interactive(template_cmd)
 
         if ret == 0:
-            self.log("Templating succeeded")
+            self.log("templating succeeded")
         else:
-            self.message("Templating failed (error code {})".format(ret))
-            sys.exit(JournalCtl.ERR_TEMPLATE_FAIL)
+            self.error("templating failed (error code {})".format(ret),
+                    JournalCtl.ERR_TEMPLATE_FAIL)
 
         # I use date field as 'last edited' field, so update again when finished
         # (my Pyplater already fills it in, but only at the start)
@@ -180,14 +184,14 @@ class JournalCtl:
 
     def cmd_edit(self, arguments):
         if not arguments:
-            self.error("command requires at least 1 argument", 2)
+            self.error("command requires at least 1 argument",
+                    JournalCtl.ERR_WRONG_ARGS)
         else:
             matches = self.find_entries(arguments)
             if len(matches) == 0:
                 self.message("No entries found for your query.")
                 sys.exit(JournalCtl.ERR_NONE_FOUND)
             if len(matches) > 1:
-                self.log("many entries found")
                 self.message("More than one entry found for your query.")
                 # ask user which one to open
                 index = self.interactive_number_chooser(matches)
@@ -447,11 +451,22 @@ class JournalCtl:
         front_matter = []
         for line in raw_front_matter:
             parts = line.split(JournalCtl.FRONT_MATTER_VALUE_SEP, 1)
-            if len(parts) > 2:
-                self.error("somehow split front matter line into >2 parts")
+            if len(parts) == 2:
+                # correct
+                pass
+            elif len(parts) > 2:
+                self.error("somehow split front matter line into >2 parts",
+                        JournalCtl.ERR_BAD_FRONT_MATTER)
             elif len(parts) == 1 and parts[0] == "":
                 self.log("empty line in front matter")
                 parts = None
+            elif len(parts) == 1 and parts[0] != "":
+                self.log("front matter variable '{}' has no value".format(
+                    parts[0]))
+                parts.append(None)
+            else:
+                self.error("unknown error in front matter",
+                        JournalCtl.ERR_BAD_FRONT_MATTER)
             front_matter.append(parts)
 
         return front_matter
@@ -496,7 +511,7 @@ class JournalCtl:
                 if date != None:
                     # we were given a date to update to, so do it
                     value = date
-                    self.log("timestamp updated ({} -> {}).".format(
+                    self.message("Timestamp updated ({} -> {}).".format(
                         line[1], value))
             if var == "title":
                 # grab the title to check consistency with later
