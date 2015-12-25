@@ -11,7 +11,7 @@ import subprocess
 import time
 import shutil
 import filecmp
-import git # introduces massive startup slowdown
+import git # FIXME: introduces massive startup slowdown
 
 FILENAME = os.path.basename(sys.argv[0])
 
@@ -139,6 +139,9 @@ class JournalCtl:
             self.cmd_search(self.arguments)
         elif self.command in self.commit_aliases:
             self.cmd_commit(self.arguments)
+        elif self.command == "ne":
+            self.arguments.insert(0, "entry")
+            self.cmd_new(self.arguments)
         elif self.command == "help":
             print("Available commands: new, search, edit, help")
         else:
@@ -166,8 +169,6 @@ class JournalCtl:
             if not entry.endswith(self.entry_ext):
                 self.error("file isn't an entry, or is not correctly formed")
             entry = entry[:-len(self.entry_ext)]
-
-            self.message(entry)
 
             # now get entry title
             try:
@@ -256,6 +257,10 @@ class JournalCtl:
         # I use date field as 'last edited' field, so update again when finished
         # (my Pyplater already fills it in, but only at the start)
         self.update_time(entry_name)
+
+        # now see if we can't commit
+        # (empty args so it takes it from front matter)
+        self.cmd_commit([])
 
     def cmd_edit(self, arguments):
         if not arguments:
