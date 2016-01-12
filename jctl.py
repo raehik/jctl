@@ -126,7 +126,7 @@ class JournalCtl:
         return out.decode("utf-8").strip(), was_successful
 
     def run_interactive(self, args):
-        """Run an interactive shell command and return the return code."""
+        """Run an interactive shell command and return the exit code."""
         return subprocess.call(args, cwd=self.journal_dir)
 
     def execute_cmd(self):
