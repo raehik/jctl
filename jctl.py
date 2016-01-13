@@ -252,7 +252,7 @@ class JournalCtl:
             change_type = git_line[0]
             git_entry = git_line[1]
 
-            if self.entry_git_path(chosen_entry) == git_entry:
+            if self.get_entry_git_path(chosen_entry) == git_entry:
                 # file matches: check change type
                 change_type = git_line[0]
                 if change_type == "??":
@@ -307,14 +307,14 @@ class JournalCtl:
         if ret == 0:
             self.run_interactive([
                 "git", "add",
-                self.entry_git_path(entry)])
+                self.get_entry_git_path(entry)])
             self.run_interactive([
                 "git", "commit",
                 "-m", commit_msg + JournalCtl.COMMIT_EXTRA])
         else:
             self.message("Exiting...")
 
-    def entry_git_path(self, entry):
+    def get_entry_git_path(self, entry):
         """
         Return the path of an entry starting from the journal Git repo root.
 
@@ -633,7 +633,7 @@ class JournalCtl:
         be opening a new file -- thus other functions must do that checking
         where required.
         """
-        entry_path = self.entry_git_path(entry)
+        entry_path = self.get_entry_git_path(entry)
         return "{}/{}".format(self.journal_dir, entry_path)
 
     def get_entries(self):
