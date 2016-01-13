@@ -11,7 +11,6 @@ import subprocess
 import time
 import shutil
 import filecmp
-import git # FIXME: introduces massive startup slowdown
 
 FILENAME = os.path.basename(sys.argv[0])
 
@@ -47,6 +46,9 @@ class JournalCtl:
     FRONT_MATTER_VALUE_SEP = ": "
     FRONT_MATTER_END = "\n" + FRONT_MATTER_SEP + "\n"
 
+    GIT_UNTRACKED = "??"
+    GIT_MODIFIED = "M"
+
     def __init__(self):
         # set variables
         self.journal_dir = os.environ["HOME"] + "/projects/writing/journal"
@@ -79,7 +81,7 @@ class JournalCtl:
     def error(self, message, exit_code=1):
         """Log an error and exit."""
         self.__log_message("error: " + message, sys.stderr)
-        sys.exit(exit_code)
+        self.exit(exit_code)
 
     def usage(self, exit_code):
         """Print usage and exit depending on given exit code."""
@@ -90,7 +92,7 @@ class JournalCtl:
             pipe = sys.stderr
 
         self.parser.print_help(pipe)
-        sys.exit(exit_code)
+        self.exit(exit_code)
 
     def message(self, message):
         """Print a message to stdout, regardless of verbosity."""
@@ -114,10 +116,12 @@ class JournalCtl:
 
     def get_shell(self, args):
         """Run a shell command, returning the output."""
+        was_successful = False
+
         # we run without a shell (default) so we don't need to shell escape
         # strange titles e.g. ones with punctuation in
-        was_successful = False
-        proc = subprocess.Popen(args, stdout=subprocess.PIPE)
+        # also run in self.journal_dir
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, cwd=self.journal_dir)
         out, err = proc.communicate()
 
         if proc.returncode == 0:
@@ -126,7 +130,13 @@ class JournalCtl:
         return out.decode("utf-8").strip(), was_successful
 
     def run_interactive(self, args):
-        """Run an interactive shell command and return the exit code."""
+        """
+        Run an interactive shell command and return the exit code.
+
+
+        Blocks execution while the command is running.
+        """
+        # run it in self.journal_dir
         return subprocess.call(args, cwd=self.journal_dir)
 
     def execute_cmd(self):
@@ -149,64 +159,168 @@ class JournalCtl:
                     "No such command '{}'".format(self.command),
                     JournalCtl.ERR_NO_SUCH_CMD)
 
+    def get_git_status(self):
+        """ Get and parse the output of `git status` into an easier format to
+        manipulate."""
+        repo_status = self.get_shell(["git", "status", "--porcelain"])[0]
+
+        # split -> lines, strip leading/trailing whitespace & split on whitespace
+        git_status = [ line.strip().split() for line in repo_status.split("\n") ]
+
+        # (at this point we always have at least 1 element)
+        if len(git_status[0]) == 0:
+            # return empty list if no changes
+            return []
+        else:
+            return git_status
+
     def cmd_commit(self, arguments):
         """
-        Commit a file.
+        Try to commit a number of files, depending on repo conditions and
+        arguments.
+
+        For now, it will commit 1 file at most.
+
+        Current behaviour:
+          * if exactly 1 untracked file:
+              * commit using arguments[0] if present and end
+          * else search for entries using arguments as keywords
+              * title chooser (default value/pre-entered stuff?)
+              * if exactly 1 match, commit it and end
+              * else use number chooser
 
         ATM very simple, just checks if there is one untracked entry and if
         so, commits it.
         """
-        repo = git.Repo(self.journal_dir)
-        if len(repo.untracked_files) == 1 and repo.untracked_files[0].startswith(self.entry_dir):
-            self.log("one untracked file in entry directory, using single-entry commit mode")
+        chosen_entry = None
+        title = None
+        git_status = self.get_git_status()
 
-            # obtain entry name
-            entry_rel_path = repo.untracked_files[0]
-            entry = entry_rel_path
-            if not entry.startswith(self.entry_dir + "/"):
-                self.error("file isn't an entry, or is not correctly formed")
-            entry = entry[len(self.entry_dir) + 1:]
-            if not entry.endswith(self.entry_ext):
-                self.error("file isn't an entry, or is not correctly formed")
-            entry = entry[:-len(self.entry_ext)]
+        # test for simple conditions
 
-            # now get entry title
-            try:
-                # use argument if we were passed one
-                entry_title = arguments[0]
-            except IndexError:
-                for var in self.get_front_matter(entry):
-                    if var[0] == "title":
-                        entry_title = var[1]
-                        break
+        # no dirty files
+        if len(git_status) == 0:
+            self.message("No dirty/untracked files to commit")
+            self.exit(JournalCtl.SUCCESS)
 
-            # strip quotes
-            if (entry_title.startswith("\"") and entry_title.endswith("\"")) or \
-                    (entry_title.startswith("'") and entry_title.endswith("'")):
-                entry_title = entry_title[1:-1]
+        # exactly 1 dirty file
+        elif len(git_status) == 1:
+            # check if it's untracked
+            if git_status[0][0] == JournalCtl.GIT_UNTRACKED:
+                self.log("exactly one untracked file found, committing")
 
-            # form commit message
-            commit_msg = "{}: {}".format(entry_title, JournalCtl.COMMIT_END)
+                # remove leading entry directory (full git path is always present in
+                # --porcelain mode)
+                chosen_entry = git_status[0][1][
+                        len(self.entry_dir)+1:-len(self.entry_ext)]
 
-            # ask whether to commit
-            self.message("About to commit:")
-            self.message(" > {}".format(entry_rel_path))
-            self.message(" > {}".format(commit_msg))
-            ret = self.__yn_prompt("OK to add & commit?")
-            if ret == 0:
-                # DON'T use Python's git shit for adding/committing, effs up
-                # with dates & doesn't show output
-                #repo.index.add([entry_rel_path])
-                #repo.index.commit(commit_msg + JournalCtl.COMMIT_EXTRA)
+                # get title for commit
+                if len(arguments) >= 1:
+                    title = arguments[0]
 
-                self.run_interactive([
-                    "git", "add",
-                    entry_rel_path])
-                self.run_interactive([
-                    "git", "commit",
-                    "-m", commit_msg + JournalCtl.COMMIT_EXTRA])
+                # commit entry
+                self.commit_entry(chosen_entry, title)
+
+                self.exit(JournalCtl.SUCCESS)
+            # file not untracked, leave it for now
             else:
-                self.message("Exiting...")
+                self.message("One file was found but it is being tracked. For now jctl can't do anything to modified files.")
+                self.exit(JournalCtl.SUCCESS)
+            # no args, >1 file
+        else:
+            self.error("more than one dirty file found, please specify which one to commit",
+                    self.exit(JournalCtl.ERR_WRONG_ARGS))
+
+        matches = self.find_entries(arguments)
+
+        # choose 1 entry from matched entries
+        if len(matches) == 0:
+            self.message("No entries found for your query.")
+            self.exit(JournalCtl.ERR_NONE_FOUND)
+        else:
+            index = self.interactive_number_chooser(matches)
+            if index == -1:
+                # hit Ctrl-C / cancelled it
+                self.message("Selection cancelled, exiting")
+                self.exit(JournalCtl.ERR_SELECT_CANCEL)
+            chosen_entry = matches[index]
+
+        # check files are dirty
+        # NOTE: only looks for one entry at the moment, chosen_entry.
+        valid_entries = []
+        for git_line in git_status:
+            change_type = git_line[0]
+            git_entry = git_line[1]
+
+            if self.entry_git_path(chosen_entry) == git_entry:
+                # file matches: check change type
+                change_type = git_line[0]
+                if change_type == "??":
+                    # file is untracked
+                    valid_entries.append(git_line[1])
+                elif change_type == "M":
+                    # file has changes (modified)
+                    # TODO: we do nothing for now, but we could later
+                    pass
+
+        # check for number of dirty files found
+        commit_entry = None
+        if len(valid_entries) == 0:
+            self.error("entry '{}' is not dirty".format(chosen_entry),
+                    JournalCtl.ERR_NONE_FOUND)
+        elif len(valid_entries) > 1:
+            self.message("More than one valid entry for committing, ending prematurely. jctl doesn't support it yet, sorry!")
+            self.exit(JournalCtl.SUCCESS)
+        else:
+            commit_entry = valid_entries[0]
+
+        # get title
+        if len(arguments) >= 2:
+            title = arguments[1]
+
+        # commit file
+        self.commit_entry(commit_entry, title)
+
+    def commit_entry(self, entry, title=None):
+        entry_title = title
+
+        if not entry_title:
+            # get title from entry front matter
+            for var in self.get_front_matter(entry):
+                if var[0] == "title":
+                    entry_title = var[1]
+                    break
+
+        # strip quotes (used when taking title from front matter)
+        if (entry_title.startswith("\"") and entry_title.endswith("\"")) or \
+                (entry_title.startswith("'") and entry_title.endswith("'")):
+            entry_title = entry_title[1:-1]
+
+        # form commit message
+        commit_msg = "{}: {}".format(entry_title, JournalCtl.COMMIT_END)
+
+        # ask whether to commit
+        self.message("About to commit:")
+        self.message(" > {}".format(entry))
+        self.message(" >   * {}".format(commit_msg))
+        ret = self.__yn_prompt("OK to add & commit?")
+        if ret == 0:
+            self.run_interactive([
+                "git", "add",
+                self.entry_git_path(entry)])
+            self.run_interactive([
+                "git", "commit",
+                "-m", commit_msg + JournalCtl.COMMIT_EXTRA])
+        else:
+            self.message("Exiting...")
+
+    def entry_git_path(self, entry):
+        """
+        Return the path of an entry starting from the journal Git repo root.
+
+        Used for `git add`ing things.
+        """
+        return "{}/{}{}".format(self.entry_dir, entry, self.entry_ext)
 
     def cmd_new(self, arguments):
         """
@@ -258,9 +372,10 @@ class JournalCtl:
         # (my Pyplater already fills it in, but only at the start)
         self.update_time(entry_name)
 
-        # now see if we can't commit
-        # (empty args so it takes it from front matter)
-        self.cmd_commit([])
+        # commit if the new file is the only dirty one
+        if len(self.get_git_status()) == 1:
+            # (empty args so it takes it from front matter)
+            self.cmd_commit([])
 
     def cmd_edit(self, arguments):
         if not arguments:
@@ -270,7 +385,7 @@ class JournalCtl:
             matches = self.find_entries(arguments)
             if len(matches) == 0:
                 self.message("No entries found for your query.")
-                sys.exit(JournalCtl.ERR_NONE_FOUND)
+                self.exit(JournalCtl.ERR_NONE_FOUND)
             if len(matches) > 1:
                 self.message("More than one entry found for your query.")
                 # ask user which one to open
@@ -278,7 +393,7 @@ class JournalCtl:
                 if index == -1:
                     # hit Ctrl-C / cancelled it
                     self.message("Selection cancelled, exiting")
-                    sys.exit(JournalCtl.ERR_SELECT_CANCEL)
+                    self.exit(JournalCtl.ERR_SELECT_CANCEL)
                 else:
                     # index is valid
                     e = matches[index]
@@ -291,6 +406,8 @@ class JournalCtl:
         """
         Show an interactive chooser for a list of options and return the number
         entered.
+
+        options: an array of strings
 
         For valid input, returns a positive integer for the option's index in
         the list.
@@ -345,8 +462,12 @@ class JournalCtl:
         return index
 
     def find_entries(self, keywords):
-        """Try to find entries matching *all* given keyword(s) in the filename
-        *and* sort them most recent first."""
+        """
+        Try to find entries with filenames matching *every* keyword.
+
+        keywords: an array of strings
+
+        Returns a list of matched entries, sorted most recent first."""
         entries = self.get_entries()
 
         # for every entry:
@@ -368,13 +489,18 @@ class JournalCtl:
     def cmd_search(self, arguments):
         """Search for keywords in full journal text."""
 
+        if not arguments:
+            # we didn't get any arguments
+            self.error("need at least 1 argument to search for",
+                    JournalCtl.ERR_WRONG_ARGS)
+
         # get matches for *all* keywords
         matches_all = self.search_entries(arguments)
 
         # pretty-print 'all' matches
         if len(matches_all) == 0:
             self.message("No matches found for your query")
-            sys.exit(JournalCtl.SUCCESS)
+            self.exit(JournalCtl.SUCCESS)
         elif len(matches_all) == 1:
             self.message("1 match found")
         elif len(matches_all) > 1:
@@ -385,7 +511,7 @@ class JournalCtl:
             index = self.interactive_number_chooser(matches_all)
             if index == -1:
                 self.message("Selection cancelled, exiting")
-                sys.exit(JournalCtl.ERR_SELECT_CANCEL)
+                self.exit(JournalCtl.ERR_SELECT_CANCEL)
             else:
                 self.edit_entry(matches_all[index])
         elif yn == 1:
@@ -507,8 +633,8 @@ class JournalCtl:
         be opening a new file -- thus other functions must do that checking
         where required.
         """
-        return "{}/{}/{}{}".format(
-                self.journal_dir, self.entry_dir, entry, self.entry_ext)
+        entry_path = self.entry_git_path(entry)
+        return "{}/{}".format(self.journal_dir, entry_path)
 
     def get_entries(self):
         """
@@ -518,8 +644,12 @@ class JournalCtl:
         'YYYY-MM-DD-title-slug'). This function returns the 'basename' of each
         entry, without full path *or the extension*.
         """
-        return [ os.path.splitext(entry)[0] for entry in os.listdir(
-            "{}/{}".format(self.journal_dir, self.entry_dir)) ]
+        return [
+            os.path.splitext(entry)[0]
+                for entry in os.listdir(
+                        "{}/{}".format(self.journal_dir, self.entry_dir))
+                if not entry.startswith(".")
+               ]
 
     def get_front_matter(self, entry):
         with self.open_entry(entry) as f:
