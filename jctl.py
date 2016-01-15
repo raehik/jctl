@@ -29,6 +29,8 @@ class JournalCtl:
     ERR_FILE_EXISTS = 4
     ERR_NO_SUCH_CMD = 5
     ERR_WRONG_ARGS = 6
+    ERR_BAD_FRONT_MATTER = 7
+    ERR_NOT_VALID = 8
 
     READ_ONLY = "r"
     WRITE_ONLY = "w"
@@ -291,7 +293,7 @@ class JournalCtl:
             # something else (are there any other types of changes?)
             self.error("didn't understand git file status (not '{}' or '{}')".
                     format(JournalCtl.GIT_MODIFIED, JournalCtl.GIT_UNTRACKED),
-                    JournalCtl.ERROR)
+                    JournalCtl.ERR_NOT_VALID)
 
         # strip quotes (used when taking title from front matter)
         if (entry_title.startswith("\"") and entry_title.endswith("\"")) or \
@@ -728,6 +730,7 @@ class JournalCtl:
         entry_file = self.get_entry_file(entry)
 
         new_text = ""
+        entry_title = None
         new_text += JournalCtl.FRONT_MATTER_SEP + "\n"
         for line in front_matter:
             if line == None:
@@ -751,6 +754,11 @@ class JournalCtl:
             new_text += "{}: {}\n".format(var, value)
         new_text += JournalCtl.FRONT_MATTER_SEP + "\n"
         new_text += entry_text
+
+        # check that we got a title
+        if not entry_title:
+            self.error("no title found in front matter",
+                    JournalCtl.ERR_BAD_FRONT_MATTER)
 
         with open(entry_file, JournalCtl.WRITE_ONLY) as f:
             f.write(new_text)
