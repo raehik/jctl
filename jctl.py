@@ -164,6 +164,9 @@ class JournalCtl:
         elif self.command == "ne":
             self.arguments.insert(0, "entry")
             self.cmd_new(self.arguments)
+        elif self.command == "nm":
+            self.arguments.insert(0, "meal")
+            self.cmd_new(self.arguments)
         elif self.command == "help":
             print("Available commands: new, search, edit, help")
         else:
