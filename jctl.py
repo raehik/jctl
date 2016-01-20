@@ -488,18 +488,31 @@ class JournalCtl:
 
     def find_entries(self, keywords):
         """
-        Try to find entries with filenames matching *every* keyword.
+        Try to find entries with filenames matching *every* keyword
+        (case-insensitive).
 
         keywords: an array of strings
 
-        Returns a list of matched entries, sorted most recent first."""
+        Returns a list of matched entries, sorted most recent first.
+        """
         entries = self.get_entries()
+
+        # Make all arguments slugs like the entry names (since we're not using
+        # titles, just 'filenames' essentially).
+        # This means you can search in any of these ways:
+        #
+        #     jctl edit "Exact title, converted to slug using JournalCtl.SLUG_CMD"
+        #     jctl edit Different keywords which can match in any order
+        #     jctl edit "your-own-slug-converted-is-the-same"
+        #
+        keywords = [ self.get_shell([JournalCtl.SLUG_CMD, word])[0] for word in keywords ]
 
         # for every entry:
         #     if all keywords separately found in entry, entry is a match
         matches = []
         for entry in entries:
-            if all(word in entry for word in keywords):
+            # be case-insensitive
+            if all(word.lower() in entry.lower() for word in keywords):
                 matches.append(entry)
 
         if len(matches) == 0:
