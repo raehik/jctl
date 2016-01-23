@@ -31,6 +31,7 @@ class JournalCtl:
     ERR_WRONG_ARGS = 6
     ERR_BAD_FRONT_MATTER = 7
     ERR_NOT_VALID = 8
+    ERR_GIT = 9
 
     READ_ONLY = "r"
     WRITE_ONLY = "w"
@@ -63,6 +64,8 @@ class JournalCtl:
         self.edit_aliases = ["edit", "e"]
         self.search_aliases = ["search", "s"]
         self.commit_aliases = ["commit", "c"]
+        self.push_aliases = ["push", "p"]
+        self.help_aliases = ["help", "h"]
 
         self.__parse_args()
 
@@ -123,6 +126,7 @@ class JournalCtl:
         self.command = self.args.command
         self.edit_commit = self.args.edit
 
+        # TODO: we don't actually use these yet
         self.title = self.args.title
         self.file = self.args.file
 
@@ -167,8 +171,10 @@ class JournalCtl:
         elif self.command == "nm":
             self.arguments.insert(0, "meal")
             self.cmd_new(self.arguments)
-        elif self.command == "help":
-            print("Available commands: new, search, edit, help")
+        elif self.command in self.push_aliases:
+            self.cmd_push()
+        elif self.command in self.help_aliases:
+            print("Available commands: new, edit, search, commit, push, help")
         else:
             self.error(
                     "No such command '{}'".format(self.command),
@@ -786,6 +792,15 @@ class JournalCtl:
             new_file = self.get_entry_file(check_entry)
             shutil.move(entry_file, new_file)
             self.log("moved entry ({} -> {})".format(entry, check_entry))
+
+    def cmd_push(self):
+        self.message("Pushing...")
+        ret = self.run_interactive(["git", "push"])
+        if ret == 0:
+            self.log("push succeeded")
+        else:
+            self.error("Push failed, error code {}".format(ret),
+                    JournalCtl.ERR_GIT)
 
 
 
