@@ -357,7 +357,6 @@ class JournalCtl:
         entry_title = " ".join(arguments[1:])
         slug, ret = self.get_shell([JournalCtl.SLUG_CMD, entry_title])
         entry_name = "{}-{}".format(time.strftime("%F"), slug)
-        print("Entry name: " + entry_name)
         entry_file = self.get_entry_file(entry_name)
 
         # check that exact file does not exist already
