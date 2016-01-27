@@ -112,8 +112,7 @@ class JournalCtl:
         # add arguments
         self.parser.add_argument("command", help="command to run")
         self.parser.add_argument("arguments", nargs="*", help="argument(s) for command")
-        self.parser.add_argument("-t", "--title", help="title to use in commit message")
-        self.parser.add_argument("-f", "--file", help="keywords to search for in entry titles for committing")
+        self.parser.add_argument("-m", "--msg", help="commit message for entry name (left of colon)")
         self.parser.add_argument("-e", "--edit",
                 help="commit: bring up Git commit edit dialogue",
                 action="store_true")
@@ -124,11 +123,8 @@ class JournalCtl:
         self.args = self.parser.parse_args()
         self.arguments = self.args.arguments
         self.command = self.args.command
+        self.commit_msg = self.args.msg
         self.edit_commit = self.args.edit
-
-        # TODO: we don't actually use these yet
-        self.title = self.args.title
-        self.file = self.args.file
 
     def get_shell(self, args):
         """Run a shell command, returning the output."""
@@ -221,24 +217,9 @@ class JournalCtl:
         # If c_title isn't changed from the default it's automagically taken
         # from the entry when committing.
         if len(git_status) == 0:
-            # no dirty files, exit
-            if len(arguments) > 0:
-                self.log("no dirty/untracked files")
-                self.exit(JournalCtl.ERR_NONE_FOUND)
-            else:
-                self.message("No dirty/untracked files to commit")
-                self.exit(JournalCtl.SUCCESS)
-        elif len(git_status) == 1:
-            # exactly 1 dirty file, choose it
-            c_type = git_status[0][0]
-            c_git_entry = git_status[0][1]
-            if len(arguments) > 0:
-                if len(arguments) != 1:
-                    self.log("cmd_commit: 1 dirty file, ignoring extra arguments for title")
-                c_title = arguments[0]
-
+            self.message("No dirty/untracked files to commit")
+            self.exit(JournalCtl.ERR_NONE_FOUND)
         else:
-            # >1 dirty file, search through using arguments
             valid_entries = []
 
             if len(arguments) == 0:
@@ -250,8 +231,8 @@ class JournalCtl:
                     entry = self.get_entry_from_git_path(line[1])
 
                     # search for keywords in dirty files
-                    # keywords are all arguments except last (unless
-                    if all(word in entry for word in arguments[:-1].split()):
+                    # keywords are all arguments except last
+                    if all(word in entry for word in arguments):
                         valid_entries.append(line)
 
             # choose 1 entry from matched entries
@@ -259,16 +240,22 @@ class JournalCtl:
                 self.message("No dirty entries found for your query.")
                 self.exit(JournalCtl.ERR_NONE_FOUND)
             else:
-                index = self.interactive_number_chooser([line[1] for line in valid_entries])
+                index = self.interactive_number_chooser(
+                        [self.get_entry_from_git_path(line[1])
+                            for line in valid_entries])
                 if index == -1:
                     # hit Ctrl-C / cancelled it
                     self.message("Selection cancelled, exiting")
                     self.exit(JournalCtl.ERR_SELECT_CANCEL)
                 c_type = valid_entries[index][0]
                 c_git_entry = valid_entries[index][1]
-                if len(arguments) > 1:
-                    # title is last argument passed
-                    c_title = arguments[-1]
+
+                # set entry title part of commit message after entry name
+                if self.commit_msg:
+                    c_title = self.commit_msg
+                else:
+                    # let commit_entry() work it out
+                    c_title = None
 
         # commit file
         self.commit_entry(c_git_entry, c_type, c_title)
@@ -370,6 +357,7 @@ class JournalCtl:
         entry_title = " ".join(arguments[1:])
         slug, ret = self.get_shell([JournalCtl.SLUG_CMD, entry_title])
         entry_name = "{}-{}".format(time.strftime("%F"), slug)
+        print("Entry name: " + entry_name)
         entry_file = self.get_entry_file(entry_name)
 
         # check that exact file does not exist already
@@ -403,10 +391,8 @@ class JournalCtl:
         # (my Pyplater already fills it in, but only at the start)
         self.update_time(entry_name)
 
-        # commit if the new file is the only dirty one
-        if len(self.get_git_status()) == 1:
-            # (empty args so it takes it from front matter)
-            self.cmd_commit([])
+        # ask to commit the new file
+        self.cmd_commit([entry_name])
 
     def cmd_edit(self, arguments):
         if not arguments:
