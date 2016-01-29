@@ -388,10 +388,11 @@ class JournalCtl:
 
         # I use date field as 'last edited' field, so update again when finished
         # (my Pyplater already fills it in, but only at the start)
-        self.update_time(entry_name)
+        # since the previous operation may change the entry name, re-grab it)
+        fixed_entry_name = self.update_time(entry_name)
 
         # ask to commit the new file
-        self.cmd_commit([entry_name])
+        self.cmd_commit([fixed_entry_name])
 
     def cmd_edit(self, arguments):
         if not arguments:
@@ -721,8 +722,9 @@ class JournalCtl:
         return entry_text
 
     def update_time(self, entry):
-        """Update the time in an entry to the time now."""
-        self.fix_entry(entry, date=time.strftime("%F %T"))
+        """Fix an entry using its metadata and update its time to the time
+        now."""
+        return self.fix_entry(entry, date=time.strftime("%F %T"))
 
     def fix_entry(self, entry, date=None):
         """
@@ -730,6 +732,8 @@ class JournalCtl:
         in-file to be accurate) and fix the filename if required.
 
         If a date is provided, replace the file's 'date' field with it.
+
+        Returns the updated entry name (or the original one if unchanged).
         """
         front_matter = self.get_front_matter(entry)
         entry_text = self.get_entry_text(entry)
@@ -777,6 +781,9 @@ class JournalCtl:
             new_file = self.get_entry_file(check_entry)
             shutil.move(entry_file, new_file)
             self.log("moved entry ({} -> {})".format(entry, check_entry))
+            return check_entry
+        else:
+            return entry
 
     def cmd_push(self):
         self.message("Pushing...")
