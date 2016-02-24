@@ -643,6 +643,8 @@ class JournalCtl:
         the temporary file's name.
 
         Requires that JournalCtl.TMP_DIR exists.
+
+        TODO: use mktemp instead
         """
         tmp_dir = JournalCtl.TMP_DIR
         tmp_file = JournalCtl.TMP_DIR + "/" \
