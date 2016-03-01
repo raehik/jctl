@@ -563,7 +563,7 @@ class JournalCtl:
 
         yn = self.__yn_prompt("Open a matched entry?")
         if yn == 0:
-            index = self.interactive_number_chooser(matches_all)
+            index = self.interactive_number_chooser(matches_all, reverse=True)
             if index == -1:
                 self.message("Selection cancelled, exiting")
                 self.exit(JournalCtl.ERR_SELECT_CANCEL)
@@ -608,7 +608,7 @@ class JournalCtl:
         Try to find entries matching given keywords in the text, where a
         valid match is *each of* of the keywords found in text.
 
-        Return a list of matches.
+        Return a sorted list of matches, oldest to newest.
         """
 
         entries = self.get_entries()
@@ -629,7 +629,7 @@ class JournalCtl:
         if len(matches) > 1:
             self.log("more than 1 match found for keywords")
 
-        return sorted(matches, reverse=True)
+        return sorted(matches)
 
     def get_text_of(self, entry):
         """Return the contents of the specified entry."""
