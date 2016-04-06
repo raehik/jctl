@@ -819,6 +819,10 @@ class JournalCtl:
             if var == "title":
                 # grab the title to check consistency with later
                 entry_title = value
+            if value == None:
+                # empty field, error out
+                self.error("YAML variable '{}' has no value assigned",
+                        JournalCtl.ERR_BAD_FRONT_MATTER)
             new_text += "{}: {}\n".format(var, value)
         new_text += JournalCtl.FRONT_MATTER_SEP + "\n"
         new_text += entry_text
