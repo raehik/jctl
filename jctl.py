@@ -32,6 +32,7 @@ class JournalCtl:
     ERR_BAD_FRONT_MATTER = 7
     ERR_NOT_VALID = 8
     ERR_GIT = 9
+    ERR_NO_FILE = 10
 
     READ_ONLY = "r"
     WRITE_ONLY = "w"
@@ -68,6 +69,16 @@ class JournalCtl:
         self.help_aliases = ["help", "h"]
 
         self.__parse_args()
+
+        # ensure that required directories exist
+        if not os.path.exists(self.journal_dir):
+            self.error("journal directory '{}' does not exist".format(
+                    self.journal_dir),
+                JournalCtl.ERR_NO_FILE)
+        if not os.path.exists("{}/{}".format(self.journal_dir, self.entry_dir)):
+            self.error("entry directory '{}' does not exist in journal directory".format(
+                    self.entry_dir),
+                JournalCtl.ERR_NO_FILE)
 
     def exit(self, exit_code=0):
         """Deinitialise and exit."""
@@ -118,6 +129,8 @@ class JournalCtl:
                 action="store_true")
         self.parser.add_argument("-v", "--verbose", help="be verbose",
                 action="store_true")
+        self.parser.add_argument("-b", "--base",
+                help="base Jekyll directory to use (parent of _posts)")
 
         # parse & grab arguments
         self.args = self.parser.parse_args()
@@ -125,6 +138,9 @@ class JournalCtl:
         self.command = self.args.command
         self.commit_msg = self.args.msg
         self.edit_commit = self.args.edit
+
+        if self.args.base:
+            self.journal_dir = self.args.base
 
     def get_shell(self, args):
         """Run a shell command, returning the output."""
