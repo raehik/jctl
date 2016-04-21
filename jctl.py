@@ -157,14 +157,18 @@ class JournalCtl:
 
         return out.decode("utf-8").strip(), was_successful
 
-    def run_interactive(self, args):
+    def run_interactive(self, args, cwd=None):
         """
         Run an interactive shell command and return the exit code.
 
         Blocks execution while the command is running.
         """
-        # run it in self.journal_dir
-        return subprocess.call(args, cwd=self.journal_dir)
+        # run it in self.journal_dir, or given directory
+        if cwd:
+            run_dir = cwd
+        else:
+            run_dir = self.journal_dir
+        return subprocess.call(args, cwd=run_dir)
 
     def execute_cmd(self):
         """Try to run something based on the command given."""
@@ -410,7 +414,7 @@ class JournalCtl:
             for arg in arguments[2:]:
                 template_cmd.append(arg)
 
-        ret = self.run_interactive(template_cmd)
+        ret = self.run_interactive(template_cmd, cwd=os.getcwd())
 
         if ret == 0:
             self.log("templating succeeded")
