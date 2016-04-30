@@ -801,7 +801,7 @@ class JournalCtl:
         """
         Fix an entry using its metadata and update its time to the time now.
         """
-        return self.fix_entry(entry, date=time.strftime("%F %T"))
+        return self.fix_entry(entry, date=time.strftime("%F %T %z"))
 
     def fix_entry(self, entry, date=None):
         """
