@@ -390,7 +390,7 @@ class JournalCtl:
                 len(arguments)), JournalCtl.ERR_WRONG_ARGS)
 
         # get title & name of new entry
-        entry_title = " ".join(arguments[1:])
+        entry_title = arguments[1]
         slug, ret = self.get_shell([JournalCtl.SLUG_CMD, entry_title])
         entry_name = "{}-{}".format(time.strftime("%F"), slug)
         entry_file = self.get_entry_file(entry_name)
