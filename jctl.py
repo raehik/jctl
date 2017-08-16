@@ -50,7 +50,7 @@ class JournalCtl:
 
     def __init__(self):
         # set variables
-        self.journal_dir = os.environ["HOME"] + "/projects/writing/journal"
+        self.journal_dir = os.environ["HOME"] + "/proj/writing/journal"
         self.entry_dir = "_posts"
         self.editor = os.environ["EDITOR"]
         self.entry_ext = ".md" # if this has >1 full stop then you gotta fix get_entries()
